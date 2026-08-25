@@ -4,13 +4,19 @@
 # Usage: luma-fetch <secrets-file>
 #
 # stdout line 1 is "##luma-status:<token>", the rest is the ICS payload.
-# Tokens: ok, missing, insecure, nourl, network.
+# Tokens: ok, default, insecure, network. "default" is a good payload from
+# the standard Omarchy community calendar, served when there is no personal
+# feed URL yet.
 #
 # The feed URL contains a secret token, so this script reads the secrets
 # file itself: the URL never appears in process arguments, QML, or output.
 set -o pipefail
 
 status() { printf '##luma-status:%s\n' "$1"; }
+
+# The standard Omarchy community calendar is public; it is what the widget
+# shows until a personal subscription URL is configured.
+DEFAULT_ICS_URL="https://api.luma.com/ics/get?entity=calendar&id=cal-SDGGMsEps9ExsrT"
 
 demo_dir=""
 if [ -n "$LUMA_DEMO_DIR" ]; then
@@ -25,25 +31,24 @@ if [ -n "$demo_dir" ] && [ -f "$demo_dir/feed.ics" ]; then
 fi
 
 secrets="$1"
-if [ -z "$secrets" ] || [ ! -f "$secrets" ]; then
-  status missing
-  exit 3
+url=""
+feed_status="ok"
+if [ -n "$secrets" ] && [ -f "$secrets" ]; then
+  # GNU stat on Omarchy; the -f form keeps the demo runnable on BSD/macOS.
+  perms=$(stat -c '%a' "$secrets" 2>/dev/null || stat -f '%Lp' "$secrets" 2>/dev/null)
+  case "$perms" in
+    600|400) ;;
+    *)
+      status insecure
+      exit 4
+      ;;
+  esac
+  url=$(grep -m1 '^LUMA_ICS_URL=' "$secrets" | cut -d= -f2- | tr -d '"' | tr -d "'")
 fi
 
-# GNU stat on Omarchy; the -f form keeps the demo runnable on BSD/macOS.
-perms=$(stat -c '%a' "$secrets" 2>/dev/null || stat -f '%Lp' "$secrets" 2>/dev/null)
-case "$perms" in
-  600|400) ;;
-  *)
-    status insecure
-    exit 4
-    ;;
-esac
-
-url=$(grep -m1 '^LUMA_ICS_URL=' "$secrets" | cut -d= -f2- | tr -d '"' | tr -d "'")
 if [ -z "$url" ]; then
-  status nourl
-  exit 5
+  url="$DEFAULT_ICS_URL"
+  feed_status="default"
 fi
 
 # Luma's "Add iCal Subscription" copies a webcal:// link; that scheme is
@@ -56,5 +61,5 @@ if [ $? -ne 0 ] || [ -z "$body" ]; then
   exit 6
 fi
 
-status ok
+status "$feed_status"
 printf '%s\n' "$body"

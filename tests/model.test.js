@@ -7,8 +7,6 @@ const path = require("path")
 const Model = require("../Model.js")
 
 const fixtureIcs = fs.readFileSync(path.join(__dirname, "..", "demo", "fixtures", "feed.ics"), "utf8")
-const fixtureList = fs.readFileSync(path.join(__dirname, "..", "demo", "fixtures", "api-list.json"), "utf8")
-const fixtureDetail = fs.readFileSync(path.join(__dirname, "..", "demo", "fixtures", "api-detail-evt-demo-ams.json"), "utf8")
 
 test("splitScriptOutput separates the status line from the payload", () => {
   const out = Model.splitScriptOutput("##luma-status:ok\nBEGIN:VCALENDAR\nEND:VCALENDAR")
@@ -108,6 +106,11 @@ test("cityFromLocation picks the city segment", () => {
   assert.equal(Model.cityFromLocation(""), "")
 })
 
+test("cityFromLocation drops a venue-less event's URL location", () => {
+  assert.equal(Model.cityFromLocation("https://luma.com/event/evt-YDyCEwwpiM"), "")
+  assert.equal(Model.cityFromLocation("  https://lu.ma/abc123"), "")
+})
+
 test("eventSlug normalizes lu.ma and luma.com to one key", () => {
   assert.equal(Model.eventSlug("https://lu.ma/abc123"), "abc123")
   assert.equal(Model.eventSlug("https://luma.com/abc123?utm=x"), "abc123")
@@ -115,30 +118,44 @@ test("eventSlug normalizes lu.ma and luma.com to one key", () => {
   assert.equal(Model.eventSlug("https://example.com/abc"), "")
 })
 
-test("parseApiEntries reads the fixture list", () => {
-  const hosted = Model.parseApiEntries(fixtureList)
-  assert.equal(hosted.length, 2)
-  assert.equal(hosted[0].id, "evt-demo-ams")
-  assert.equal(hosted[0].capacity, 35)
-  assert.equal(hosted[0].spotsRemaining, 12)
-  assert.equal(hosted[1].capacity, null)
+// The meta tag shape is copied from a live luma.com event page (2026-08-25):
+// attribute order varies, og:image:width/height must not match, and the
+// embedded JSON carries the raw cover as "cover_url".
+const eventPageHtml = '<html><head>' +
+  '<meta property="og:image:width" content="800"/>' +
+  '<meta property="og:image:height" content="420"/>' +
+  '<meta name="image" property="og:image" content="https://images.lumacdn.com/cdn-cgi/image/format=auto,fit=cover,dpr=1,width=800,height=420/event-social/oh/social.png" data-next-head=""/>' +
+  '</head><body>{"cover_url":"https://images.lumacdn.com/uploads/79/cover.png"}</body></html>'
+
+test("coverUrlFromHtml prefers the embedded cover_url as a CDN thumb", () => {
+  assert.equal(
+    Model.coverUrlFromHtml(eventPageHtml),
+    "https://images.lumacdn.com/cdn-cgi/image/format=auto,fit=cover,dpr=2,quality=75,width=80,height=80/uploads/79/cover.png")
 })
 
-test("parseApiEntries returns null on invalid JSON and [] on no entries", () => {
-  assert.equal(Model.parseApiEntries("not json"), null)
-  assert.deepEqual(Model.parseApiEntries('{"entries": []}'), [])
+test("coverUrlFromHtml falls back to og:image and decodes entities", () => {
+  const withoutJson = eventPageHtml.replace(/\{"cover_url".*\}/, "")
+  assert.equal(
+    Model.coverUrlFromHtml(withoutJson),
+    "https://images.lumacdn.com/cdn-cgi/image/format=auto,fit=cover,dpr=2,quality=75,width=80,height=80/event-social/oh/social.png")
+  const entities = '<meta property="og:image" content="https://example.com/a.png?x=1&amp;y=2"/>'
+  assert.equal(Model.coverUrlFromHtml(entities), "https://example.com/a.png?x=1&y=2")
 })
 
-test("guestCountFromDetail reads approved guests", () => {
-  assert.equal(Model.guestCountFromDetail(fixtureDetail), 23)
-  assert.equal(Model.guestCountFromDetail("not json"), null)
-  assert.equal(Model.guestCountFromDetail("{}"), null)
+test("coverUrlFromHtml handles escaped JSON slashes and missing covers", () => {
+  assert.equal(
+    Model.coverUrlFromHtml('{"cover_url":"https:\\/\\/images.lumacdn.com\\/uploads\\/x.png"}'),
+    "https://images.lumacdn.com/cdn-cgi/image/format=auto,fit=cover,dpr=2,quality=75,width=80,height=80/uploads/x.png")
+  assert.equal(Model.coverUrlFromHtml("<html><body>nothing here</body></html>"), "")
+  assert.equal(Model.coverUrlFromHtml(""), "")
 })
 
-test("guestCountFallback derives the count from capacity", () => {
-  assert.equal(Model.guestCountFallback(35, 12), 23)
-  assert.equal(Model.guestCountFallback(null, 12), null)
-  assert.equal(Model.guestCountFallback(35, null), null)
+test("coverThumbUrl only rewrites lumacdn URLs, never twice", () => {
+  const thumb = Model.coverThumbUrl("https://images.lumacdn.com/uploads/79/cover.png")
+  assert.equal(thumb, "https://images.lumacdn.com/cdn-cgi/image/format=auto,fit=cover,dpr=2,quality=75,width=80,height=80/uploads/79/cover.png")
+  assert.equal(Model.coverThumbUrl(thumb), thumb)
+  assert.equal(Model.coverThumbUrl("file:///tmp/luma-demo/cover-x.png"), "file:///tmp/luma-demo/cover-x.png")
+  assert.equal(Model.coverThumbUrl(""), "")
 })
 
 test("futureEvents filters, sorts, and caps", () => {
@@ -154,43 +171,6 @@ test("futureEvents drops past events", () => {
   assert.equal(Model.futureEvents(Model.parseIcs(fixtureIcs), afterAll, 10).length, 0)
 })
 
-test("mergeHostData marks hosted events and attaches counts", () => {
-  const feed = Model.parseIcs(fixtureIcs)
-  const hosted = Model.parseApiEntries(fixtureList)
-  const merged = Model.mergeHostData(feed, hosted, { "evt-demo-ams": 23, "evt-demo-hack": 18 })
-  const ams = merged.find(e => e.slug === "omarchy-ams-demo")
-  assert.equal(ams.hosted, true)
-  assert.equal(ams.guests, 23)
-  assert.equal(ams.capacity, 35)
-  const hack = merged.find(e => e.slug === "qs-hack-demo")
-  assert.equal(hack.hosted, true)
-  assert.equal(hack.guests, 18)
-  assert.equal(hack.capacity, null)
-  const lug = merged.find(e => e.slug === "lug-borrel-demo")
-  assert.equal(lug.hosted, false)
-})
-
-test("mergeHostData falls back to capacity minus spots remaining", () => {
-  const feed = Model.parseIcs(fixtureIcs)
-  const hosted = Model.parseApiEntries(fixtureList)
-  const merged = Model.mergeHostData(feed, hosted, {})
-  const ams = merged.find(e => e.slug === "omarchy-ams-demo")
-  assert.equal(ams.guests, 23)
-})
-
-test("mergeHostData appends a hosted event missing from the feed", () => {
-  const hosted = Model.parseApiEntries(fixtureList)
-  const merged = Model.mergeHostData([], hosted, {})
-  assert.equal(merged.length, 2)
-  assert.equal(merged[0].hosted, true)
-})
-
-test("mergeHostData does not mutate the feed list", () => {
-  const feed = Model.parseIcs(fixtureIcs)
-  Model.mergeHostData(feed, Model.parseApiEntries(fixtureList), {})
-  assert.ok(feed.every(e => e.hosted === false))
-})
-
 test("daysUntil counts calendar days", () => {
   const now = new Date(2027, 8, 1, 22, 0).getTime()
   const tomorrowMorning = new Date(2027, 8, 2, 8, 0).getTime()
@@ -198,19 +178,13 @@ test("daysUntil counts calendar days", () => {
   assert.equal(Model.daysUntil(now, now), 0)
 })
 
-test("barLabel shows days, time when today, and guest counts when hosted", () => {
+test("barLabel shows days until the event, or the time when it is today", () => {
   const now = new Date(2027, 8, 1, 9, 0).getTime()
-  const in12Days = { startMs: new Date(2027, 8, 13, 19, 0).getTime(), hosted: false, guests: null, capacity: null }
+  const in12Days = { startMs: new Date(2027, 8, 13, 19, 0).getTime() }
   assert.equal(Model.barLabel(in12Days, now), "12d")
 
-  const today = { startMs: new Date(2027, 8, 1, 18, 0).getTime(), hosted: false, guests: null, capacity: null }
+  const today = { startMs: new Date(2027, 8, 1, 18, 0).getTime() }
   assert.equal(Model.barLabel(today, now), "18:00")
-
-  const hosted = { startMs: new Date(2027, 8, 13, 19, 0).getTime(), hosted: true, guests: 23, capacity: 35 }
-  assert.equal(Model.barLabel(hosted, now), "12d · 23/35")
-
-  const uncapped = { startMs: new Date(2027, 8, 13, 19, 0).getTime(), hosted: true, guests: 18, capacity: null }
-  assert.equal(Model.barLabel(uncapped, now), "12d · 18")
 
   assert.equal(Model.barLabel(null, now), "")
 })
@@ -231,19 +205,6 @@ test("clampMaxEvents guards the row cap", () => {
   assert.equal(Model.clampMaxEvents(10), 10)
   assert.equal(Model.clampMaxEvents(0), 10)
   assert.equal(Model.clampMaxEvents(999), 50)
-})
-
-test("newRegistrationCheck seeds silently, then flags growth", () => {
-  const hosted = Model.parseApiEntries(fixtureList)
-  const first = Model.newRegistrationCheck(null, hosted, { "evt-demo-ams": 23 })
-  assert.equal(first.grew, false)
-  assert.equal(first.counts["evt-demo-ams"], 23)
-
-  const second = Model.newRegistrationCheck(first.counts, hosted, { "evt-demo-ams": 24 })
-  assert.equal(second.grew, true)
-
-  const third = Model.newRegistrationCheck(second.counts, hosted, { "evt-demo-ams": 24 })
-  assert.equal(third.grew, false)
 })
 
 test("lastPollLabel describes freshness", () => {

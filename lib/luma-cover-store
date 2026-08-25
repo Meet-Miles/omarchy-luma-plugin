@@ -1,0 +1,30 @@
+#!/bin/bash
+# Persist one resolved cover URL so the event page is fetched once per
+# machine, not once per shell restart (Omarchy restarts the shell on every
+# theme change — without this cache every machine would re-download every
+# event page each time).
+#
+# Usage: luma-cover-store <slug> [thumb-url]
+#
+# An empty URL is stored too: it records "this page has no cover", so the
+# page is not refetched either. Only https:// URLs are persisted — the
+# demo's file:// covers point into a temporary directory and must never
+# outlive it. The cache holds public image URLs only, never feed data.
+set -euo pipefail
+
+slug="$1"
+url="${2:-}"
+
+# Slugs come from event URLs; accept only safe filename characters.
+case "$slug" in
+  ""|*[!A-Za-z0-9_.-]*|.|..) exit 0 ;;
+esac
+
+case "$url" in
+  ""|https://*) ;;
+  *) exit 0 ;;
+esac
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/studiotwin.luma/covers"
+mkdir -p "$cache_dir"
+printf '%s\n' "$url" > "$cache_dir/$slug"

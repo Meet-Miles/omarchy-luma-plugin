@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Studio Twin",
   "license": "MIT",
-  "description": "Your Luma events in the bar: countdown, event list, and guest counts for hosts.",
+  "description": "Your upcoming Luma events in the bar, with cover art. Shows the Omarchy community calendar out of the box, or your own Luma feed.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Luma",
-    "description": "Countdown to your next Luma event, with guest counts for hosts.",
+    "description": "Your upcoming Luma events with cover art — the Omarchy community calendar, or your own feed.",
     "category": "Productivity",
     "aliases": ["luma", "events", "meetup"],
     "allowMultiple": false,
@@ -22,7 +22,7 @@
     "defaults": {
       "secretsFilePath": "~/.config/omarchy/luma.env",
       "refreshIntervalSec": 1800,
-      "maxEvents": 10
+      "maxEvents": 30
     }
   }
 }

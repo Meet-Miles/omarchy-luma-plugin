@@ -1,5 +1,5 @@
-// Data layer for the Luma widget: iCal feed parsing, the merge with the
-// calendar API's host data, and every label the bar and panel print.
+// Data layer for the Luma widget: iCal feed parsing, cover-art extraction,
+// and every label the bar and panel print.
 //
 // Pure functions over plain data, shared by Panel.qml and the node test
 // suite (see the module.exports block at the bottom, same pattern as the
@@ -126,18 +126,17 @@ function finishIcsEvent(raw) {
     url: url,
     slug: eventSlug(url),
     startMs: raw.startMs,
-    endMs: (raw.endMs !== undefined && !isNaN(raw.endMs)) ? raw.endMs : raw.startMs,
-    hosted: false,
-    guests: null,
-    capacity: null
+    endMs: (raw.endMs !== undefined && !isNaN(raw.endMs)) ? raw.endMs : raw.startMs
   }
 }
 
 // Luma locations read "Venue, Street 1, City, Country" or just "City".
 // The city is the second segment from the end once a country is present;
 // with one or two segments the first is the best guess. Leading postal
-// codes ("1012 AB Amsterdam") are stripped.
+// codes ("1012 AB Amsterdam") are stripped. An event without a venue
+// carries its own page URL as the location — no city to show there.
 function cityFromLocation(location) {
+  if (/^https?:\/\//i.test(String(location || "").trim())) return ""
   var parts = String(location || "").split(",")
     .map(function(part) { return part.replace(/^\s+|\s+$/g, "") })
     .filter(function(part) { return part !== "" })
@@ -146,64 +145,41 @@ function cityFromLocation(location) {
   return candidate.replace(/^[0-9][0-9A-Z ]*\s+(?=[A-Za-z])/, "")
 }
 
-// ---- Matching feed entries to API events. Luma serves the same event as
-//      lu.ma/<slug> and luma.com/<slug>; the slug is the identity.
+// ---- Event identity. Luma serves the same event as lu.ma/<slug> and
+//      luma.com/<slug>; the slug keys the cover cache.
 function eventSlug(url) {
   var m = /^https:\/\/(?:www\.)?(?:lu\.ma|luma\.com)\/([^\s/?#]+)/i.exec(String(url || ""))
   return m ? m[1].toLowerCase() : ""
 }
 
-// ---- API responses.
+// ---- Cover art. The event page embeds the raw square cover as
+//      "cover_url" in its JSON payload; the og:image social card (800×420,
+//      with text baked in) is the fallback. lib/luma-cover only moves the
+//      HTML; the extraction lives here so the tests cover it.
 
-// /v1/calendars/events/list with default access=manage: every entry is an
-// event this calendar manages, which is what "hosted" means here.
-function parseApiEntries(json) {
-  var data
-  try { data = JSON.parse(String(json || "")) } catch (e) { return null }
-  if (!data || !data.entries || !data.entries.length) return []
-  var out = []
-  for (var i = 0; i < data.entries.length; i++) {
-    var e = data.entries[i]
-    if (!e || !e.id || !e.start_at) continue
-    var startMs = Date.parse(e.start_at)
-    if (isNaN(startMs)) continue
-    out.push({
-      id: String(e.id),
-      slug: eventSlug(e.url),
-      url: String(e.url || ""),
-      name: String(e.name || ""),
-      startMs: startMs,
-      capacity: numberOrNull(e.max_capacity),
-      spotsRemaining: numberOrNull(e.spots_remaining)
-    })
+function coverUrlFromHtml(html) {
+  var text = String(html || "")
+  var m = /"cover_url":"(https:[^"]+)"/.exec(text)
+  var url = m ? m[1].replace(/\\\//g, "/") : ""
+  if (!url) {
+    var tag = /<meta[^>]*property="og:image"[^>]*>/.exec(text)
+    var content = tag ? /content="([^"]+)"/.exec(tag[0]) : null
+    if (content) url = content[1].replace(/&amp;/g, "&")
   }
-  return out
+  return coverThumbUrl(url)
 }
 
-function numberOrNull(value) {
-  var n = parseFloat(String(value))
-  return isNaN(n) ? null : n
+// Luma serves covers from images.lumacdn.com, whose cdn-cgi prefix resizes
+// on the fly. The panel thumb is ~40px, so ask the CDN for an 80px square
+// (2× for hidpi) instead of pulling the full upload. Other hosts (and the
+// demo's file:// covers) pass through unchanged.
+function coverThumbUrl(url) {
+  var m = /^https:\/\/images\.lumacdn\.com\/(?:cdn-cgi\/image\/[^/]+\/)?(.+)$/.exec(String(url || ""))
+  if (!m) return String(url || "")
+  return "https://images.lumacdn.com/cdn-cgi/image/format=auto,fit=cover,dpr=2,quality=75,width=80,height=80/" + m[1]
 }
 
-// /v1/events/get: guest_counts.approved.guests is the going count. The
-// capped-event fallback (capacity minus spots remaining) covers a detail
-// fetch that failed.
-function guestCountFromDetail(json) {
-  var data
-  try { data = JSON.parse(String(json || "")) } catch (e) { return null }
-  var counts = data && data.guest_counts
-  if (counts && counts.approved && counts.approved.guests !== undefined)
-    return numberOrNull(counts.approved.guests)
-  return null
-}
-
-function guestCountFallback(capacity, spotsRemaining) {
-  if (capacity === null || spotsRemaining === null) return null
-  var n = capacity - spotsRemaining
-  return n >= 0 ? n : null
-}
-
-// ---- The merged list.
+// ---- The event list.
 
 function futureEvents(events, nowMs, maxEvents) {
   var cap = clampMaxEvents(maxEvents)
@@ -211,42 +187,6 @@ function futureEvents(events, nowMs, maxEvents) {
     .filter(function(e) { return e.endMs >= nowMs || e.startMs >= nowMs })
     .sort(function(a, b) { return a.startMs - b.startMs })
     .slice(0, cap)
-}
-
-// Host data folds into the feed list by slug. A hosted event missing from
-// the feed (the feed should carry it, but section 4.1 says confirm) is
-// appended so the merged list stays complete.
-function mergeHostData(feedEvents, hostedEvents, guestCountsById) {
-  var counts = guestCountsById || {}
-  var merged = (feedEvents || []).map(function(e) {
-    var copy = {}
-    for (var k in e) copy[k] = e[k]
-    return copy
-  })
-  var bySlug = {}
-  for (var i = 0; i < merged.length; i++)
-    if (merged[i].slug) bySlug[merged[i].slug] = merged[i]
-
-  for (var j = 0; j < (hostedEvents || []).length; j++) {
-    var host = hostedEvents[j]
-    var target = host.slug ? bySlug[host.slug] : null
-    if (!target) {
-      target = {
-        name: host.name, location: "", city: "", url: host.url, slug: host.slug,
-        startMs: host.startMs, endMs: host.startMs,
-        hosted: false, guests: null, capacity: null
-      }
-      merged.push(target)
-      if (host.slug) bySlug[host.slug] = target
-    }
-    target.hosted = true
-    target.capacity = host.capacity
-    var known = counts[host.id]
-    target.guests = (known !== undefined && known !== null)
-      ? known
-      : guestCountFallback(host.capacity, host.spotsRemaining)
-  }
-  return merged
 }
 
 // ---- Labels.
@@ -282,20 +222,13 @@ function dateLabel(ms, nowMs) {
   return WEEKDAYS[d.getDay()] + " " + d.getDate() + " " + MONTHS[d.getMonth()]
 }
 
-function guestLabel(event) {
-  if (!event || !event.hosted || event.guests === null) return ""
-  return event.guests + (event.capacity !== null ? "/" + event.capacity : "")
-}
-
-// The bar: days until the next event ("12d"), its start time when it is
-// today ("18:00"), and the guest count when that event is hosted
-// ("12d · 23/35").
+// The next-event summary: days until it ("12d"), or its start time when it
+// is today ("18:00"). The bar itself shows only the glyph; this feeds the
+// tooltip and the demo preview.
 function barLabel(nextEvent, nowMs) {
   if (!nextEvent) return ""
   var days = daysUntil(nextEvent.startMs, nowMs)
-  var head = days <= 0 ? timeLabel(nextEvent.startMs) : days + "d"
-  var guests = guestLabel(nextEvent)
-  return guests === "" ? head : head + " · " + guests
+  return days <= 0 ? timeLabel(nextEvent.startMs) : days + "d"
 }
 
 function lastPollLabel(lastGoodMs, nowMs) {
@@ -320,25 +253,6 @@ function clampMaxEvents(value) {
   return Math.min(50, n)
 }
 
-// ---- The registration badge: any hosted event whose guest count rose
-//      since the previous poll. The first poll seeds the baseline and
-//      never badges.
-function newRegistrationCheck(previousCounts, hostedEvents, guestCountsById) {
-  var next = {}
-  var grew = false
-  for (var i = 0; i < (hostedEvents || []).length; i++) {
-    var host = hostedEvents[i]
-    var count = (guestCountsById || {})[host.id]
-    if (count === undefined || count === null)
-      count = guestCountFallback(host.capacity, host.spotsRemaining)
-    if (count === null) continue
-    next[host.id] = count
-    var previous = previousCounts ? previousCounts[host.id] : undefined
-    if (previous !== undefined && count > previous) grew = true
-  }
-  return { counts: next, grew: previousCounts !== null && grew }
-}
-
 if (typeof module !== "undefined") {
   module.exports = {
     splitScriptOutput: splitScriptOutput,
@@ -350,19 +264,15 @@ if (typeof module !== "undefined") {
     parseIcs: parseIcs,
     cityFromLocation: cityFromLocation,
     eventSlug: eventSlug,
-    parseApiEntries: parseApiEntries,
-    guestCountFromDetail: guestCountFromDetail,
-    guestCountFallback: guestCountFallback,
+    coverUrlFromHtml: coverUrlFromHtml,
+    coverThumbUrl: coverThumbUrl,
     futureEvents: futureEvents,
-    mergeHostData: mergeHostData,
     daysUntil: daysUntil,
     timeLabel: timeLabel,
     dateLabel: dateLabel,
-    guestLabel: guestLabel,
     barLabel: barLabel,
     lastPollLabel: lastPollLabel,
     clampRefreshInterval: clampRefreshInterval,
-    clampMaxEvents: clampMaxEvents,
-    newRegistrationCheck: newRegistrationCheck
+    clampMaxEvents: clampMaxEvents
   }
 }

@@ -28,9 +28,6 @@ done
 day() {
   date -u -d "+$1 days" +%Y%m%d 2>/dev/null || date -u -v"+$1d" +%Y%m%d
 }
-iso_day() {
-  date -u -d "+$1 days" +%Y-%m-%d 2>/dev/null || date -u -v"+$1d" +%Y-%m-%d
-}
 
 workdir=$(mktemp -d)
 runtime="${XDG_RUNTIME_DIR:-/tmp}"
@@ -41,7 +38,7 @@ cleanup() {
   rm -rf "$workdir"
   if command -v omarchy-shell >/dev/null 2>&1; then
     omarchy-shell shell hide "$plugin_id" >/dev/null 2>&1 || true
-    omarchy-shell ipc call "$plugin_id" refresh >/dev/null 2>&1 || true
+    omarchy-shell -q "$plugin_id" refresh >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -89,32 +86,19 @@ END:VEVENT
 END:VCALENDAR
 ICS
 
-cat > "$workdir/api-list.json" << JSON
-{
-  "entries": [
-    {
-      "id": "evt-demo-ams",
-      "name": "Omarchy Amsterdam Meetup",
-      "start_at": "$(iso_day 2)T17:00:00.000Z",
-      "url": "https://lu.ma/omarchy-ams-demo",
-      "max_capacity": 35,
-      "spots_remaining": 12
-    },
-    {
-      "id": "evt-demo-hack",
-      "name": "Quickshell Hack Night",
-      "start_at": "$(iso_day 12)T17:30:00.000Z",
-      "url": "https://lu.ma/qs-hack-demo",
-      "max_capacity": null,
-      "spots_remaining": null
-    }
-  ],
-  "has_more": false
+# ---- Cover art: a tiny gradient PNG per event, served through a fake
+#      event page so lib/luma-cover and Model.coverUrlFromHtml run the
+#      same path as against the real site (file:// skips the CDN resize).
+cover() {
+  local slug="$1" png="$2"
+  printf '%s' "$png" | base64 -d > "$workdir/cover-$slug.png"
+  printf '<html><head><meta property="og:image" content="file://%s/cover-%s.png"/></head><body>{"cover_url":"file://%s/cover-%s.png"}</body></html>\n' \
+    "$workdir" "$slug" "$workdir" "$slug" > "$workdir/page-$slug.html"
 }
-JSON
-
-cp "$here/fixtures/api-detail-evt-demo-ams.json" "$workdir/"
-cp "$here/fixtures/api-detail-evt-demo-hack.json" "$workdir/"
+cover omarchy-ams-demo "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIEAIAAAAb/fWfAAAAO0lEQVQY02P08qqt3bePgWjA8rPn29qPViRo+NXzdc0na5ra0P1tzUdSbPjV85U0G372fCPND79I9AMAg2shcMfDNvcAAAAASUVORK5CYII="
+cover lug-borrel-demo "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIEAIAAAAb/fWfAAAAQ0lEQVQY02PcvDksTE+PgWjA8qXte+rPdOI1MM7a76qg8IdEG36RYkPjKePXwqdJsuEHSTawfCbV0zExUlLEK2dgAAAinhpqYz/ztAAAAABJRU5ErkJggg=="
+cover qs-hack-demo "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIEAIAAAAb/fWfAAAAQUlEQVQY02O0t6+tjYpiIBqw/Oz51vFTjgQNv3q+dvyUpakN3V/bSdHAKPfLU8X8PYl++EWCHxiFhExMtLSI1wAAnf8aTp9BX1gAAAAASUVORK5CYII="
+cover ruby-oct-demo "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIEAIAAAAb/fWfAAAARElEQVQY02Ps67O2TklhIBqwfEn6dfV7Fwkavib9vPaDFA1fkn5dJUnD1+RfV7930tKGL0m/rpHiaUZbWwEBTU3iNQAAgJUfS7xkG/QAAAAASUVORK5CYII="
 
 # ---- Textual preview, always: what the fixtures produce.
 if command -v node >/dev/null 2>&1; then
@@ -128,7 +112,7 @@ if ! command -v omarchy-shell >/dev/null 2>&1; then
 fi
 
 ln -sfn "$workdir" "$marker"
-omarchy-shell ipc call "$plugin_id" refresh >/dev/null 2>&1 || true
+omarchy-shell -q "$plugin_id" refresh >/dev/null 2>&1 || true
 sleep 1
 omarchy-shell shell summon "$plugin_id" '{}'
 

@@ -1,0 +1,92 @@
+#!/bin/bash
+# Download a Luma event page so the panel can show its cover art.
+#
+# Usage: luma-cover <event-url> <slug>
+#
+# stdout line 1 is "##luma-status:<token>", the rest is the payload.
+# Tokens: cached (payload is the resolved thumb URL from the disk cache —
+# possibly empty for a known coverless page), ok (payload is the page
+# HTML), none (no such page — cache as coverless), ratelimited (429 — back
+# off and retry), network (retry later). This script only moves bytes; the
+# cover URL extraction lives in Model.js (coverUrlFromHtml), where the
+# tests reach it, and resolved URLs are persisted via luma-cover-store.
+#
+# The event URL comes from the user's own feed and is exactly the link a
+# click on the row opens; no secret leaves this machine beyond that request.
+set -o pipefail
+
+status() { printf '##luma-status:%s\n' "$1"; }
+
+url="$1"
+slug="$2"
+
+demo_dir=""
+if [ -n "$LUMA_DEMO_DIR" ]; then
+  demo_dir="$LUMA_DEMO_DIR"
+elif [ -e "${XDG_RUNTIME_DIR:-/tmp}/luma-demo" ]; then
+  demo_dir="${XDG_RUNTIME_DIR:-/tmp}/luma-demo"
+fi
+if [ -n "$demo_dir" ]; then
+  if [ -n "$slug" ] && [ -f "$demo_dir/page-$slug.html" ]; then
+    status ok
+    cat "$demo_dir/page-$slug.html"
+  else
+    # A real slug caught while demo mode is active: answer "network" so the
+    # panel leaves it uncached and retries after the demo, instead of
+    # negative-caching it as a coverless event.
+    status network
+  fi
+  exit 0
+fi
+
+if [ -z "$url" ]; then
+  status none
+  exit 0
+fi
+
+# The disk cache: one file per slug holding the resolved thumb URL (empty
+# for a page known to have no cover). A hit costs no network request at
+# all — the whole point, given every shell restart rebuilds the in-memory
+# cache.
+case "$slug" in
+  ""|*[!A-Za-z0-9_.-]*|.|..) ;;
+  *)
+    cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/studiotwin.luma/covers/$slug"
+    if [ -f "$cache_file" ]; then
+      status cached
+      cat "$cache_file"
+      exit 0
+    fi
+    ;;
+esac
+
+response=$(curl -sSL --max-time 20 -w $'\n%{http_code}' "$url" 2>/dev/null)
+if [ $? -ne 0 ]; then
+  status network
+  exit 6
+fi
+
+code=$(printf '%s' "$response" | tail -n1)
+body=$(printf '%s' "$response" | sed '$d')
+
+case "$code" in
+  200)
+    if [ -z "$body" ]; then
+      status network
+      exit 6
+    fi
+    status ok
+    printf '%s\n' "$body"
+    ;;
+  404|410)
+    status none
+    ;;
+  429)
+    status ratelimited
+    exit 8
+    ;;
+  *)
+    status network
+    exit 6
+    ;;
+esac

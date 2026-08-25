@@ -1,0 +1,105 @@
+#!/bin/bash
+# Interactive setup for the Luma widget.
+#
+# Out of the box the widget shows the standard Omarchy community calendar.
+# This script connects your personal Luma feed instead: it asks for your
+# iCal subscription link, checks that the link serves a calendar, and
+# writes it to the private secrets file the widget reads.
+#
+# Run it again at any time to change the link or to switch back to the
+# community calendar. The link never leaves this machine.
+set -euo pipefail
+
+secrets="${LUMA_SECRETS_FILE:-$HOME/.config/omarchy/luma.env}"
+plugin_id="studiotwin.luma"
+
+bold=$(tput bold 2>/dev/null || true)
+dim=$(tput dim 2>/dev/null || true)
+reset=$(tput sgr0 2>/dev/null || true)
+
+current=""
+if [ -f "$secrets" ]; then
+  current=$(grep -m1 '^LUMA_ICS_URL=' "$secrets" | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+fi
+
+echo "${bold}✦ Luma widget setup${reset}"
+echo
+if [ -n "$current" ]; then
+  echo "A personal Luma feed is currently connected."
+else
+  echo "The widget is currently showing the standard Omarchy community calendar."
+fi
+echo
+echo "To show your own Luma events, the widget needs your iCal subscription link:"
+echo
+echo "  1. Open ${bold}luma.com${reset} and go to your profile ${bold}Settings${reset}."
+echo "  2. Find the ${bold}Calendar Syncing${reset} row (under Account Syncing)."
+echo "  3. Click ${bold}Add iCal Subscription${reset} and copy the link"
+echo "     (right-click a calendar-app option and select \"Copy link address\")."
+echo "     A webcal:// link is also fine."
+echo
+echo "${dim}The link contains a secret token. It is stored only in $secrets (chmod 600).${reset}"
+echo
+if [ -n "$current" ]; then
+  prompt="Paste your Luma calendar link (Enter keeps the current one, \"remove\" switches back to the community calendar): "
+else
+  prompt="Paste your Luma calendar link (or press Enter to keep the community calendar): "
+fi
+read -r -p "$prompt" url
+
+case "$url" in
+  "")
+    if [ -n "$current" ]; then
+      echo "Keeping the current personal feed."
+    else
+      echo "Keeping the Omarchy community calendar. Run ./setup again whenever you want your own events."
+    fi
+    exit 0
+    ;;
+  remove|Remove|REMOVE)
+    if [ -f "$secrets" ]; then
+      rm -f "$secrets"
+      echo "Personal feed removed. The widget now shows the Omarchy community calendar."
+      command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell -q "$plugin_id" refresh || true
+    else
+      echo "No personal feed was configured; nothing to remove."
+    fi
+    exit 0
+    ;;
+esac
+
+# Luma's "Add iCal Subscription" menu copies webcal:// links; the scheme is
+# plain https underneath.
+url="${url/#webcal:\/\//https://}"
+
+case "$url" in
+  https://*) ;;
+  *)
+    echo "That does not look like a calendar link (expected https:// or webcal://)." >&2
+    exit 1
+    ;;
+esac
+
+echo "Checking the link…"
+body=$(curl -fsSL --max-time 20 "$url" 2>/dev/null) || {
+  echo "Could not download the calendar. Check the link and your network, then run ./setup again." >&2
+  exit 1
+}
+case "$body" in
+  *BEGIN:VCALENDAR*) ;;
+  *)
+    echo "The link answered, but not with a calendar. Copy the iCal subscription link itself, not the event page." >&2
+    exit 1
+    ;;
+esac
+
+install -m 600 /dev/null "$secrets"
+printf 'LUMA_ICS_URL=%s\n' "$url" > "$secrets"
+echo "Connected. Your feed is stored in $secrets."
+
+if command -v omarchy-shell >/dev/null 2>&1; then
+  omarchy-shell -q "$plugin_id" refresh || true
+  echo "The widget is refreshing now — your events appear in the bar within a few seconds."
+else
+  echo "The widget picks the feed up on its next refresh."
+fi
