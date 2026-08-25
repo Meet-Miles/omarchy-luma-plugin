@@ -1,0 +1,12 @@
+{
+  "id": "evt-demo-hack",
+  "name": "Quickshell Hack Night",
+  "url": "https://lu.ma/qs-hack-demo",
+  "max_capacity": null,
+  "spots_remaining": null,
+  "guest_counts": {
+    "approved": { "guests": 18, "tickets": 18 },
+    "pending_approval": { "guests": 0, "tickets": 0 },
+    "waitlist": { "guests": 0, "tickets": 0 }
+  }
+}

@@ -1,0 +1,141 @@
+#!/bin/bash
+# Run the Luma widget against fictional fixture data.
+#
+# Usage: demo/run [--screenshot] [--output <path>]
+#
+# The demo does not read the secrets file and does not contact the network:
+# it generates fixtures with near-future dates in a temporary directory and
+# points the plugin's fetch scripts at them through a marker symlink at
+# $XDG_RUNTIME_DIR/luma-demo. On exit the marker is removed and the widget
+# returns to real data.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+plugin_id="studiotwin.luma"
+screenshot=0
+output="$HOME/Pictures/luma-preview.png"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --screenshot) screenshot=1 ;;
+    --output) output="$2"; shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# GNU date on Omarchy; the -v form keeps the preview runnable on BSD/macOS.
+day() {
+  date -u -d "+$1 days" +%Y%m%d 2>/dev/null || date -u -v"+$1d" +%Y%m%d
+}
+iso_day() {
+  date -u -d "+$1 days" +%Y-%m-%d 2>/dev/null || date -u -v"+$1d" +%Y-%m-%d
+}
+
+workdir=$(mktemp -d)
+runtime="${XDG_RUNTIME_DIR:-/tmp}"
+marker="$runtime/luma-demo"
+
+cleanup() {
+  rm -f "$marker"
+  rm -rf "$workdir"
+  if command -v omarchy-shell >/dev/null 2>&1; then
+    omarchy-shell shell hide "$plugin_id" >/dev/null 2>&1 || true
+    omarchy-shell ipc call "$plugin_id" refresh >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+# ---- Fixtures with dates 2, 5, 12, and 21 days out, so the demo always
+#      shows a plausible upcoming schedule. All data is fictional.
+cat > "$workdir/feed.ics" << ICS
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Luma Demo//Fictional Data//EN
+BEGIN:VEVENT
+UID:demo-1@luma-demo
+SUMMARY:Omarchy Amsterdam Meetup
+DTSTART:$(day 2)T170000Z
+DTEND:$(day 2)T200000Z
+LOCATION:De Hal\\, Overtoom 3\\, Amsterdam\\, Netherlands
+URL:https://lu.ma/omarchy-ams-demo
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-2@luma-demo
+SUMMARY:Linux User Group Borrel
+DTSTART:$(day 5)T180000Z
+DTEND:$(day 5)T210000Z
+LOCATION:Cafe Achterdijk\\, Oudegracht 12\\, Utrecht\\, Netherlands
+URL:https://lu.ma/lug-borrel-demo
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-3@luma-demo
+SUMMARY:Quickshell Hack Night
+DTSTART:$(day 12)T173000Z
+DTEND:$(day 12)T220000Z
+LOCATION:Het Lab\\, Witte de Withstraat 8\\, Rotterdam\\, Netherlands
+URL:https://lu.ma/qs-hack-demo
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-4@luma-demo
+SUMMARY:Ruby Meetup
+DTSTART:$(day 21)T173000Z
+DTEND:$(day 21)T203000Z
+LOCATION:Startup Loft\\, Keizersgracht 100\\, Amsterdam\\, Netherlands
+URL:https://lu.ma/ruby-oct-demo
+END:VEVENT
+END:VCALENDAR
+ICS
+
+cat > "$workdir/api-list.json" << JSON
+{
+  "entries": [
+    {
+      "id": "evt-demo-ams",
+      "name": "Omarchy Amsterdam Meetup",
+      "start_at": "$(iso_day 2)T17:00:00.000Z",
+      "url": "https://lu.ma/omarchy-ams-demo",
+      "max_capacity": 35,
+      "spots_remaining": 12
+    },
+    {
+      "id": "evt-demo-hack",
+      "name": "Quickshell Hack Night",
+      "start_at": "$(iso_day 12)T17:30:00.000Z",
+      "url": "https://lu.ma/qs-hack-demo",
+      "max_capacity": null,
+      "spots_remaining": null
+    }
+  ],
+  "has_more": false
+}
+JSON
+
+cp "$here/fixtures/api-detail-evt-demo-ams.json" "$workdir/"
+cp "$here/fixtures/api-detail-evt-demo-hack.json" "$workdir/"
+
+# ---- Textual preview, always: what the fixtures produce.
+if command -v node >/dev/null 2>&1; then
+  node "$here/preview.js" "$workdir"
+fi
+
+# ---- Live preview through the running shell, when there is one.
+if ! command -v omarchy-shell >/dev/null 2>&1; then
+  echo "omarchy-shell not found: textual preview only." >&2
+  exit 0
+fi
+
+ln -sfn "$workdir" "$marker"
+omarchy-shell ipc call "$plugin_id" refresh >/dev/null 2>&1 || true
+sleep 1
+omarchy-shell shell summon "$plugin_id" '{}'
+
+if [ "$screenshot" -eq 1 ]; then
+  sleep 1.5
+  mkdir -p "$(dirname "$output")"
+  grim "$output"
+  echo "screenshot: $output"
+else
+  echo "Demo data active. Press Enter to restore real data."
+  read -r _
+fi

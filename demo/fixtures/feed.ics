@@ -1,0 +1,49 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Luma Demo//Fictional Data//EN
+BEGIN:VEVENT
+UID:demo-1@luma-demo
+SUMMARY:Omarchy Amsterdam Meetup
+DTSTART:20270914T170000Z
+DTEND:20270914T200000Z
+LOCATION:De Hal\, Overtoom 3\, Amsterdam\, Netherlands
+URL:https://lu.ma/omarchy-ams-demo
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-2@luma-demo
+SUMMARY:Linux User Group Borrel
+DTSTART:20270917T180000Z
+DTEND:20270917T210000Z
+LOCATION:Cafe Achterdijk\, Oudegracht 12\, Utrecht\, Netherlands
+DESCRIPTION:Drinks and lightning talks.\nhttps://lu.ma/lug-borrel-demo
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-3@luma-demo
+SUMMARY:Quickshell Hack Night
+DTSTART:20270924T173000Z
+DTEND:20270924T220000Z
+LOCATION:Het Lab\, Witte de Withstraat 8\, Rotterdam\, Netherlands
+URL:https://lu.ma/qs-hack-demo
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-4@luma-demo
+SUMMARY:Ruby Meetup October
+DTSTART:20271005T173000Z
+DTEND:20271005T203000Z
+LOCATION:Startup Loft\, Keizersgracht 100\, Amsterdam\, Netherlands
+URL:https://lu.ma/ruby-oct-demo
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:demo-5@luma-demo
+SUMMARY:Cancelled Workshop
+DTSTART:20270920T100000Z
+DTEND:20270920T120000Z
+LOCATION:Nowhere
+URL:https://lu.ma/cancelled-demo
+STATUS:CANCELLED
+END:VEVENT
+END:VCALENDAR

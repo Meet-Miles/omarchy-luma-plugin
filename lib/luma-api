@@ -1,0 +1,104 @@
+#!/bin/bash
+# Call the Luma public API for host data.
+#
+# Usage: luma-api <secrets-file> list <after-iso-8601>
+#        luma-api <secrets-file> detail <event-id>
+#
+# stdout line 1 is "##luma-status:<token>", the rest is the JSON payload.
+# Tokens: ok, missing, insecure, nokey, network, auth, ratelimited, http.
+#
+# The API key gives full read and write access to the calendar, so this
+# script reads it from the secrets file itself: the key never appears in
+# process arguments, QML, or output. Event ids are not secret and may be
+# passed as arguments.
+set -o pipefail
+
+status() { printf '##luma-status:%s\n' "$1"; }
+
+base_url="https://public-api.luma.com"
+
+demo_dir=""
+if [ -n "$LUMA_DEMO_DIR" ]; then
+  demo_dir="$LUMA_DEMO_DIR"
+elif [ -e "${XDG_RUNTIME_DIR:-/tmp}/luma-demo" ]; then
+  demo_dir="${XDG_RUNTIME_DIR:-/tmp}/luma-demo"
+fi
+if [ -n "$demo_dir" ]; then
+  case "$2" in
+    list)   fixture="$demo_dir/api-list.json" ;;
+    detail) fixture="$demo_dir/api-detail-$3.json" ;;
+    *)      fixture="" ;;
+  esac
+  if [ -n "$fixture" ] && [ -f "$fixture" ]; then
+    status ok
+    cat "$fixture"
+  else
+    status nokey
+  fi
+  exit 0
+fi
+
+secrets="$1"
+if [ -z "$secrets" ] || [ ! -f "$secrets" ]; then
+  status missing
+  exit 3
+fi
+
+perms=$(stat -c '%a' "$secrets" 2>/dev/null || stat -f '%Lp' "$secrets" 2>/dev/null)
+case "$perms" in
+  600|400) ;;
+  *)
+    status insecure
+    exit 4
+    ;;
+esac
+
+key=$(grep -m1 '^LUMA_API_KEY=' "$secrets" | cut -d= -f2- | tr -d '"' | tr -d "'")
+if [ -z "$key" ]; then
+  status nokey
+  exit 0
+fi
+
+case "$2" in
+  list)
+    path="/v1/calendars/events/list"
+    query=(--data-urlencode "after=$3" --data-urlencode "pagination_limit=50")
+    ;;
+  detail)
+    path="/v1/events/get"
+    query=(--data-urlencode "event_id=$3")
+    ;;
+  *)
+    status http
+    exit 9
+    ;;
+esac
+
+response=$(curl -sS -G --max-time 20 -w $'\n%{http_code}' \
+  -H "x-luma-api-key: $key" "${query[@]}" "$base_url$path" 2>/dev/null)
+if [ $? -ne 0 ]; then
+  status network
+  exit 6
+fi
+
+code=$(printf '%s' "$response" | tail -n1)
+body=$(printf '%s' "$response" | sed '$d')
+
+case "$code" in
+  200)
+    status ok
+    printf '%s\n' "$body"
+    ;;
+  401|403)
+    status auth
+    exit 7
+    ;;
+  429)
+    status ratelimited
+    exit 8
+    ;;
+  *)
+    status http
+    exit 9
+    ;;
+esac

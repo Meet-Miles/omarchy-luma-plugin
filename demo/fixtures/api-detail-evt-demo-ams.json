@@ -1,0 +1,12 @@
+{
+  "id": "evt-demo-ams",
+  "name": "Omarchy Amsterdam Meetup",
+  "url": "https://lu.ma/omarchy-ams-demo",
+  "max_capacity": 35,
+  "spots_remaining": 12,
+  "guest_counts": {
+    "approved": { "guests": 23, "tickets": 23 },
+    "pending_approval": { "guests": 2, "tickets": 2 },
+    "waitlist": { "guests": 0, "tickets": 0 }
+  }
+}

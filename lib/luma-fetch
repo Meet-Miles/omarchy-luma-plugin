@@ -1,0 +1,56 @@
+#!/bin/bash
+# Download the personal Luma iCal feed.
+#
+# Usage: luma-fetch <secrets-file>
+#
+# stdout line 1 is "##luma-status:<token>", the rest is the ICS payload.
+# Tokens: ok, missing, insecure, nourl, network.
+#
+# The feed URL contains a secret token, so this script reads the secrets
+# file itself: the URL never appears in process arguments, QML, or output.
+set -o pipefail
+
+status() { printf '##luma-status:%s\n' "$1"; }
+
+demo_dir=""
+if [ -n "$LUMA_DEMO_DIR" ]; then
+  demo_dir="$LUMA_DEMO_DIR"
+elif [ -e "${XDG_RUNTIME_DIR:-/tmp}/luma-demo" ]; then
+  demo_dir="${XDG_RUNTIME_DIR:-/tmp}/luma-demo"
+fi
+if [ -n "$demo_dir" ] && [ -f "$demo_dir/feed.ics" ]; then
+  status ok
+  cat "$demo_dir/feed.ics"
+  exit 0
+fi
+
+secrets="$1"
+if [ -z "$secrets" ] || [ ! -f "$secrets" ]; then
+  status missing
+  exit 3
+fi
+
+# GNU stat on Omarchy; the -f form keeps the demo runnable on BSD/macOS.
+perms=$(stat -c '%a' "$secrets" 2>/dev/null || stat -f '%Lp' "$secrets" 2>/dev/null)
+case "$perms" in
+  600|400) ;;
+  *)
+    status insecure
+    exit 4
+    ;;
+esac
+
+url=$(grep -m1 '^LUMA_ICS_URL=' "$secrets" | cut -d= -f2- | tr -d '"' | tr -d "'")
+if [ -z "$url" ]; then
+  status nourl
+  exit 5
+fi
+
+body=$(curl -fsS --max-time 20 "$url" 2>/dev/null)
+if [ $? -ne 0 ] || [ -z "$body" ]; then
+  status network
+  exit 6
+fi
+
+status ok
+printf '%s\n' "$body"
