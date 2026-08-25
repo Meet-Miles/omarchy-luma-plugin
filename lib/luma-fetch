@@ -46,6 +46,10 @@ if [ -z "$url" ]; then
   exit 5
 fi
 
+# Luma's "Add iCal Subscription" copies a webcal:// link; that scheme is
+# plain https for curl.
+url=${url/#webcal:\/\//https://}
+
 body=$(curl -fsS --max-time 20 "$url" 2>/dev/null)
 if [ $? -ne 0 ] || [ -z "$body" ]; then
   status network

@@ -25,9 +25,9 @@ omarchy plugin add https://github.com/Meet-Miles/omarchy-luma-plugin --enable
 
 Then connect your Luma feed:
 
-1. Open Luma and go to your calendar settings.
-2. Find the calendar subscription section.
-3. Copy the subscription URL.
+1. Open [luma.com](https://luma.com) and go to your profile **Settings**.
+2. Find the **Calendar Syncing** row (under Account Syncing).
+3. Click **Add iCal Subscription** and copy the link (right-click a calendar-app option and select "Copy link address"). A `webcal://` link is also good; the plugin converts it.
 4. Create the secrets file and make it private:
 
 ```bash
