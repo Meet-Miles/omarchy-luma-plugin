@@ -9,8 +9,17 @@
 # feed URL yet.
 #
 # The feed URL contains a secret token, so this script reads the secrets
-# file itself: the URL never appears in process arguments, QML, or output.
+# file itself and hands it to curl over stdin (--config -): the URL never
+# appears in any process's argv — not this script's, not curl's — nor in
+# QML or output. The response is byte-capped with head before it is
+# materialized in a shell variable, so a hostile or broken endpoint cannot
+# balloon this process or the QML collectors.
 set -o pipefail
+# Byte semantics for ${#body}, so the size cap counts bytes, not glyphs.
+export LC_ALL=C
+
+# 2 MiB: a personal feed with hundreds of events stays under 1 MiB.
+MAX_FEED_BYTES=2097152
 
 status() { printf '##luma-status:%s\n' "$1"; }
 
@@ -55,11 +64,30 @@ fi
 # plain https for curl.
 url=${url/#webcal:\/\//https://}
 
-body=$(curl -fsS --max-time 20 "$url" 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$body" ]; then
+# The URL is written into a curl config line below; refuse characters that
+# could escape the quoted value or smuggle extra config directives.
+case "$url" in
+  https://*) ;;
+  *) status network; exit 6 ;;
+esac
+case "$url" in
+  *[\"\\]*|*[[:space:]]*|*[[:cntrl:]]*) status network; exit 6 ;;
+esac
+
+# head enforces the byte cap at the pipe (curl is killed by SIGPIPE past
+# it); one extra byte distinguishes "exactly at the cap" from "over it".
+# Success is judged by the payload shape, not curl's exit code, which the
+# cap's SIGPIPE would make ambiguous.
+body=$(printf 'url = "%s"\nfail\nsilent\nshow-error\nlocation\nmax-time = 20\n' "$url" \
+  | curl --config - 2>/dev/null | head -c "$((MAX_FEED_BYTES + 1))") || true
+if [ -z "$body" ] || [ "${#body}" -gt "$MAX_FEED_BYTES" ]; then
   status network
   exit 6
 fi
+case "$body" in
+  *BEGIN:VCALENDAR*) ;;
+  *) status network; exit 6 ;;
+esac
 
 status "$feed_status"
 printf '%s\n' "$body"

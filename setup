@@ -79,12 +79,25 @@ case "$url" in
     exit 1
     ;;
 esac
+# The URL goes into a curl config line and the secrets file; refuse
+# characters that could escape either format.
+case "$url" in
+  *[\"\\\']*|*[[:space:]]*|*[[:cntrl:]]*)
+    echo "The link contains characters that never appear in a calendar URL. Copy it again." >&2
+    exit 1
+    ;;
+esac
 
 echo "Checking the link…"
-body=$(curl -fsSL --max-time 20 "$url" 2>/dev/null) || {
+# The URL reaches curl over stdin (never argv, where any same-user process
+# could read its secret token), and head byte-caps the response before it
+# lands in a shell variable.
+body=$(printf 'url = "%s"\nfail\nsilent\nlocation\nmax-time = 20\n' "$url" \
+  | curl --config - 2>/dev/null | head -c 2097152) || true
+if [ -z "$body" ]; then
   echo "Could not download the calendar. Check the link and your network, then run ./setup again." >&2
   exit 1
-}
+fi
 case "$body" in
   *BEGIN:VCALENDAR*) ;;
   *)

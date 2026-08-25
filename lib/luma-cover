@@ -12,8 +12,15 @@
 # tests reach it, and resolved URLs are persisted via luma-cover-store.
 #
 # The event URL comes from the user's own feed and is exactly the link a
-# click on the row opens; no secret leaves this machine beyond that request.
+# click on the row opens; no secret leaves this machine beyond that
+# request. The response is byte-capped before it reaches a shell variable
+# or the QML collectors: curl aborts past --max-filesize into a tmpfs
+# spool file (XDG_RUNTIME_DIR, user-only), and the read-back goes through
+# head -c as the hard OS-level bound either way.
 set -o pipefail
+
+# 3 MiB: live event pages measure ~200 KiB.
+MAX_PAGE_BYTES=3145728
 
 status() { printf '##luma-status:%s\n' "$1"; }
 
@@ -60,14 +67,20 @@ case "$slug" in
     ;;
 esac
 
-response=$(curl -sSL --max-time 20 -w $'\n%{http_code}' "$url" 2>/dev/null)
-if [ $? -ne 0 ]; then
+spool=$(mktemp -p "${XDG_RUNTIME_DIR:-/tmp}" luma-cover.XXXXXX) || { status network; exit 6; }
+trap 'rm -f "$spool"' EXIT
+
+code=$(curl -sSL --max-time 20 --max-filesize "$MAX_PAGE_BYTES" \
+  -o "$spool" -w '%{http_code}' "$url" 2>/dev/null)
+curl_exit=$?
+# Exit 63 is curl's over---max-filesize abort; treat it and every other
+# failure as a retry-later, never as page content.
+if [ "$curl_exit" -ne 0 ]; then
   status network
   exit 6
 fi
 
-code=$(printf '%s' "$response" | tail -n1)
-body=$(printf '%s' "$response" | sed '$d')
+body=$(head -c "$MAX_PAGE_BYTES" "$spool")
 
 case "$code" in
   200)

@@ -101,8 +101,13 @@ The plugin writes no other files. Event data stays in memory only.
 ## Privacy and security
 
 - The plugin does not write event data or feed URLs to disk, and does not log them.
-- `lib/luma-fetch` reads the secrets file directly: the feed URL never appears in
-  process arguments or in the shell process.
+- `lib/luma-fetch` reads the secrets file directly and hands the URL to curl over
+  stdin (`--config -`): the feed URL never appears in any process's arguments —
+  not the shell's, not curl's — so other processes cannot read the secret token
+  from a command line.
+- Every network response is byte-capped at the OS level (`head -c`, plus curl's
+  `--max-filesize` for the cover pages) before it reaches a shell variable or the
+  shell process.
 - For the cover art, the plugin downloads each event's public page once per machine
   and caches the resolved image URL in `~/.cache/studiotwin.luma` (public image
   URLs only, nothing personal); thumbnails load straight from Luma's image CDN.
