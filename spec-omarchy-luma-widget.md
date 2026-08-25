@@ -32,6 +32,8 @@ The base source is your personal Luma iCal feed. Luma gives each user a subscrip
 
 Confirm that the feed contains the events that you host. If it does not, merge the event list from the calendar API into the feed list.
 
+> Confirmed on 2026-08-25 against a live personal feed: the feed contains hosted events. Also observed: no `URL` property (the event link is in `DESCRIPTION`), `STATUS:TENTATIVE` on all events, dates in UTC, and `ORGANIZER` always `calendar-invite@lu.ma` (the feed cannot identify the host).
+
 To connect the feed:
 
 1. Open Luma and go to your calendar settings.

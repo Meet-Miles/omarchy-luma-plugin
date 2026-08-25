@@ -58,9 +58,43 @@ test("parseIcs reads the fixture feed and drops the cancelled event", () => {
 })
 
 test("parseIcs finds the event link in the description when URL is absent", () => {
+  // Real Luma feeds carry no URL property: the event page link only
+  // appears inside DESCRIPTION, often with a ?pk= token (verified against
+  // a live feed on 2026-08-25).
   const events = Model.parseIcs(fixtureIcs)
   const lug = events.find(e => e.name === "Linux User Group Borrel")
-  assert.equal(lug.url, "https://lu.ma/lug-borrel-demo")
+  assert.equal(lug.url, "https://lu.ma/lug-borrel-demo?pk=g-DemoToken123")
+  assert.equal(lug.slug, "lug-borrel-demo")
+})
+
+test("parseIcs keeps TENTATIVE events", () => {
+  // Live Luma feeds mark every event STATUS:TENTATIVE; only CANCELLED
+  // may be dropped.
+  const events = Model.parseIcs(fixtureIcs)
+  assert.ok(events.some(e => e.name === "Linux User Group Borrel"))
+})
+
+test("parseIcs handles a real-style Luma VEVENT", () => {
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "SUMMARY:Omarchy Leiden\\, NL Meetup",
+    "DTSTART:20261016T140000Z",
+    "DTEND:20261016T170000Z",
+    "LOCATION:Leiden\\, Netherlands",
+    'ORGANIZER;CN="Matthew Wilson":MAILTO:calendar-invite@lu.ma',
+    "DESCRIPTION:Details:\\nhttps://luma.com/fu43mtcv",
+    "STATUS:TENTATIVE",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].join("\r\n")
+  const events = Model.parseIcs(ics)
+  assert.equal(events.length, 1)
+  assert.equal(events[0].name, "Omarchy Leiden, NL Meetup")
+  assert.equal(events[0].startMs, Date.UTC(2026, 9, 16, 14, 0, 0))
+  assert.equal(events[0].url, "https://luma.com/fu43mtcv")
+  assert.equal(events[0].slug, "fu43mtcv")
+  assert.equal(events[0].city, "Leiden")
 })
 
 test("unescapeIcsText handles commas, semicolons, newlines, backslashes", () => {

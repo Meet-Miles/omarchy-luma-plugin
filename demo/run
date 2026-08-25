@@ -66,7 +66,9 @@ SUMMARY:Linux User Group Borrel
 DTSTART:$(day 5)T180000Z
 DTEND:$(day 5)T210000Z
 LOCATION:Cafe Achterdijk\\, Oudegracht 12\\, Utrecht\\, Netherlands
-URL:https://lu.ma/lug-borrel-demo
+ORGANIZER;CN="Demo Host":MAILTO:calendar-invite@lu.ma
+DESCRIPTION:Drinks and lightning talks.\\nhttps://lu.ma/lug-borrel-demo
+STATUS:TENTATIVE
 END:VEVENT
 BEGIN:VEVENT
 UID:demo-3@luma-demo

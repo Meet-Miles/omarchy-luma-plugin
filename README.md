@@ -136,7 +136,18 @@ The plugin writes no other files. Event data stays in memory only.
 
 The plugin was written and unit-tested on a Mac. The QML follows the contracts of the built-in
 `omarchy.clock` and `omarchy.weather` plugins (branch `quattro`), but it did not run against
-the real shell yet. Continue on an Omarchy machine with these steps:
+the real shell yet.
+
+The fetch script and the parser were validated against a live personal feed on 2026-08-25:
+
+- The personal feed contains the events that you host (spec section 4.1 is confirmed).
+- Real feeds have no `URL` property. The parser takes the event page link from `DESCRIPTION`.
+- Real feeds mark events `STATUS:TENTATIVE`. The parser drops only `CANCELLED`.
+- Dates come as UTC (`...Z`). The parser converts them to local time.
+- The `ORGANIZER` email is always `calendar-invite@lu.ma`, so the feed cannot identify the
+  host reliably. The `HOST` marker stays an API-key feature.
+
+Continue on an Omarchy machine with these steps:
 
 1. Clone this repository into the plugin folder and enable it:
 
@@ -160,7 +171,7 @@ omarchy plugin validate ~/.config/omarchy/plugins/studiotwin.luma
 qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml
 ```
 
-4. Run the data-layer tests: `node --test tests/model.test.js` (29 tests, all pass on 2026-08-25).
+4. Run the data-layer tests: `node --test tests/model.test.js` (31 tests, all pass on 2026-08-25).
 5. Test the panel routes: `omarchy-shell shell summon studiotwin.luma '{}'` and `omarchy-shell shell hide studiotwin.luma`.
 6. Test a click, `Escape`, disable, enable, a shell restart, and removal.
 7. Run `demo/run` and `demo/run --screenshot`.
@@ -168,7 +179,6 @@ qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml
 Open items to verify on the Omarchy machine:
 
 - `demo/run` calls `omarchy-shell ipc call studiotwin.luma refresh`. Confirm this IPC syntax. The fallback is the right-click refresh in the bar.
-- Confirm that your personal iCal feed contains the events that you host (spec section 4.1). The merge appends API-only hosted events when the feed does not contain them.
 - The `Style`, `Color`, `WidgetButton`, `KeyboardPanel`, `PanelKeyCatcher`, and `OpticalGlyph` calls come from the built-in plugins. Confirm them with `qmllint`.
 - Before the marketplace submission: make the repository public, validate the last commit, and submit through the issue form at `github.com/HANCORE-linux/omarchy-plugin-marketplace` (template `submit-plugin.yml`).
 
