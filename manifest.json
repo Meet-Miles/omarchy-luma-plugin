@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "studiotwin.luma",
   "name": "Luma",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Studio Twin",
   "license": "MIT",
   "description": "Your upcoming Luma events in the bar, with cover art. Shows the Omarchy community calendar out of the box, or your own Luma feed.",
